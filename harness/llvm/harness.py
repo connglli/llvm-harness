@@ -582,6 +582,11 @@ class Harness:
 
     tools.append(BashTool(self.acl))
 
+    # -- SMT solver (Z3) --
+    from harness.tools.z3smt import SmtSolveTool
+
+    tools.append(SmtSolveTool())
+
     # -- Build-dir tools --
     from harness.tools.llvm_check_optim import CheckOptimTool
     from harness.tools.llvm_llc import CompileIrTool
