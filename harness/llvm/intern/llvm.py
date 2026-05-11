@@ -55,6 +55,11 @@ def reset(commit):
   git_execute(["checkout", commit])
 
 
+def pull_latest():
+  reset("main")
+  git_execute(["pull", "origin", "main"])
+
+
 def build(max_build_jobs: int, additional_cmake_args=[]):
   os.makedirs(__llvm_build_dir, exist_ok=True)
   log = ""

@@ -375,12 +375,12 @@ class Harness:
   # -------------------------------------------------------------------
 
   def __enter__(self) -> Harness:
-    # For bench issues, set build dir to a per-issue subdirectory and reset the repo.
+    # For bench issues, set build dir to a per-issue subdirectory.
     if self._issue_id:
       llvm_ops.set_llvm_build_dir(
         os.path.join(llvm_ops.get_llvm_build_dir(), self._issue_id)
       )
-      self._reset_with_retry()
+      self.fixenv.reset()
 
     # Rebuild ACL now that the build dir is finalized.
     self.acl = Harness._make_acl(self._acl_preset, *self._acl_extras)
@@ -389,15 +389,6 @@ class Harness:
 
   def __exit__(self, *exc):
     pass
-
-  def _reset_with_retry(self):
-    try:
-      self.fixenv.reset()
-    except Exception:
-      # Sync and retry once.
-      llvm_ops.reset("main")
-      llvm_ops.git_execute(["pull", "origin", "main"])
-      self.fixenv.reset()
 
   # -------------------------------------------------------------------
   # Operations
