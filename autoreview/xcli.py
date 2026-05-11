@@ -147,9 +147,18 @@ def main():
     )
     print(f"Agent command prepared: {command[:80]} ...")
 
-    # Prepare and install the skill into the cli's skill directory.
+    # Prepare and install the review skills into the cli's skill directory.
+    # The three skills split the original llvm-patchreview's six categories:
+    #   - integrity:   Unexpected Assertion Change + Unexpected Bypass
+    #   - correctness: New Correctness Bugs + Lacking Generality
+    #   - performance: Missed Optimizations + Hangs / Compile-time Blowups
     workdir = Path.cwd()
-    h.install_skill("llvm-patchreview", workdir / xcli_dirname)
+    for skill_name in (
+      "llvm-patchreview-integrity",
+      "llvm-patchreview-correctness",
+      "llvm-patchreview-performance",
+    ):
+      h.install_skill(skill_name, workdir / xcli_dirname, exists_ok=True)
 
     # Run the agent command to review the patch.
     print("Starting to review the patch ...")

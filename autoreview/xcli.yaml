@@ -28,6 +28,58 @@ prompt: |
 
   ## Workflow
 
-  1. Use the `llvm-patchreview` skill to review the patch and generate a review report.
-  2. Save the generated review report into {report_path}.
-  3. You are done.
+  Three independent review skills are available, each focused on a different
+  class of issue:
+
+    - `llvm-patchreview-integrity`   — Unexpected Assertion Change + Unexpected Bypass
+    - `llvm-patchreview-correctness` — New Correctness Bugs + Lacking Generality
+    - `llvm-patchreview-performance` — Missed Optimizations + Hangs / Compile-time Blowups
+
+  Run all three skills in order or in parallel. Each one produces a report with YAML
+  frontmatter containing its own `verdict` (APPROVE / REVISE / REJECT).
+
+  1. Run `llvm-patchreview-integrity`; capture its full report.
+  2. Run `llvm-patchreview-correctness`; capture its full report.
+  3. Run `llvm-patchreview-performance`; capture its full report.
+  4. Derive an aggregated verdict using this rule:
+       - any REJECT       → REJECT
+       - else any REVISE  → REVISE
+       - else             → APPROVE
+  5. Write a single combined report to {report_path} in the structure
+     below, then you are done.
+
+  ## Output structure
+
+  ```
+  ---
+  verdict: <aggregated verdict>
+  ---
+
+  # Patch Review Report
+
+  ## Summary
+
+  <summarize the review reports of the three skills in a few sentences,
+  highlighting the most important points from each>
+
+  ## Aggregated Verdict
+
+  <one short paragraph explaining how the aggregate was derived from the
+  three individual verdicts — e.g. "integrity APPROVE, correctness REVISE,
+  performance APPROVE → REVISE">
+
+  ## Integrity Review
+
+  <verbatim report from llvm-patchreview-integrity, including its own YAML
+  frontmatter>
+
+  ## Correctness Review
+
+  <verbatim report from llvm-patchreview-correctness, including its own YAML
+  frontmatter>
+
+  ## Performance Review
+
+  <verbatim report from llvm-patchreview-performance, including its own YAML
+  frontmatter>
+  ```
