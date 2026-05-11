@@ -64,6 +64,15 @@ class FixEnv:
     self.additional_cmake_args = additional_cmake_args
     self.use_entire_regression_test_suite = use_entire_regression_test_suite
     self.start_time = time.time()
+    self._reset_or_pull_reset()
+
+  def _reset_or_pull_reset(self):
+    try:
+      self.reset()
+    except Exception:
+      # Sync and retry once.
+      llvm_ops.pull_latest()
+      self.reset()
 
   def reset(self, *, files: list[str] | None = None):
     with TimeCompensationGuard(self):
