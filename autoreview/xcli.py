@@ -155,7 +155,8 @@ def main():
     workdir = Path.cwd()
     for skill_name in (
       "llvm-patchreview-integrity",
-      "llvm-patchreview-correctness",
+      "llvm-patchreview-correctness-crash",
+      "llvm-patchreview-correctness-miscompilation",
       "llvm-patchreview-performance",
     ):
       h.install_skill(skill_name, workdir / xcli_dirname, exists_ok=True)

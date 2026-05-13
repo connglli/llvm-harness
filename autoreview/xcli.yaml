@@ -28,29 +28,35 @@ prompt: |
 
   ## Workflow
 
-  Three independent review skills are available, each focused on a different
-  class of issue:
+  The following independent review skills are available, each focused on a
+  different class of issue:
 
-    - `llvm-patchreview-integrity`   — Unexpected Assertion Change + Unexpected Bypass
-    - `llvm-patchreview-correctness` — New Correctness Bugs + Lacking Generality
-    - `llvm-patchreview-performance` — Missed Optimizations + Hangs / Compile-time Blowups
+    - `llvm-patchreview-integrity`                  — Unexpected Assertion Change + Unexpected Bypass
+    - `llvm-patchreview-correctness-crash`          — New Crash Bugs + Lacking Generality
+    - `llvm-patchreview-correctness-miscompilation` — New Miscompilation Bugs + Lacking Generality
+    - `llvm-patchreview-performance`                — Missed Optimizations + Hangs / Compile-time Blowups
 
-  Run all three skills in order or in parallel. Each one produces a report with YAML
+  Run all skills in order or in parallel. Each one produces a report with YAML
   frontmatter containing its own `verdict` (APPROVE / REVISE / REJECT).
 
   1. Run `llvm-patchreview-integrity`; capture its full report.
-  2. Run `llvm-patchreview-correctness`; capture its full report.
+  2. Run `llvm-patchreview-correctness-crash`; capture its full report.
+  2. Run `llvm-patchreview-correctness-miscompilation`; capture its full report.
   3. Run `llvm-patchreview-performance`; capture its full report.
   4. Derive an aggregated verdict using this rule:
        - any REJECT       → REJECT
        - else any REVISE  → REVISE
        - else             → APPROVE
   5. Write a single combined report to {report_path} in the structure
-     below, then you are done.
+     below, then you are done. Transform each individual report as needed to
+     fit into the combined report, but keep their content verbatim.
+
+  When running each skill, pass the necessary context (e.g., reproducer,
+  patch, etc.) into it (excluding the previous reports, which it doesn't need).
 
   ## Output structure
 
-  ```
+  ------------------------------ BEGIN STRUCTURE ------------------------------
   ---
   verdict: <aggregated verdict>
   ---
@@ -70,16 +76,21 @@ prompt: |
 
   ## Integrity Review
 
-  <verbatim report from llvm-patchreview-integrity, including its own YAML
-  frontmatter>
+  <transformed verbatim report from llvm-patchreview-integrity, including
+  its own YAML frontmatter>
 
-  ## Correctness Review
+  ## Crash Review
 
-  <verbatim report from llvm-patchreview-correctness, including its own YAML
-  frontmatter>
+  <transformed verbatim report from llvm-patchreview-correctness-crash,
+  including its own YAML frontmatter>
+
+  ## Miscompilation Review
+
+  <transformed verbatim report from llvm-patchreview-correctness-miscompilation,
+  including its own YAML frontmatter>
 
   ## Performance Review
 
-  <verbatim report from llvm-patchreview-performance, including its own YAML
-  frontmatter>
-  ```
+  <transformed verbatim report from llvm-patchreview-performance, including
+  its own YAML frontmatter>
+  ------------------------------ END STRUCTURE ------------------------------
