@@ -93,5 +93,5 @@ Artifacts for the arXiv paper are available at the [experiment](https://github.c
 
 ## 🤝 Acknowledgements
 
-1. The logo was co-design with Nano Banana.
-2. This project is partially supported by an award from the Hasler Fundation.
+1. The logo was co-designed with Nano Banana.
+2. This project is partially supported by an award from the Hasler Foundation.
