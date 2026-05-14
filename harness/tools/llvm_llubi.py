@@ -15,14 +15,14 @@ class InterpretIrTool(LlvmBuildDirMixin, StatelessFuncToolBase):
   def spec(self) -> FuncToolSpec:
     return FuncToolSpec(
       "llvm_interpret_ir",
-      "Interprete an LLVM IR file strictly following LLVM IR's semantics and return its output and exit code. "
+      "Interpret an LLVM IR file strictly following LLVM IR's semantics and return its output and exit code. "
       "This tool is different from `llvm_execute_ir` in that it will check immediate undefined behaviors "
       "during execution and handle poison values properly. "
       "It does not have JIT compilation, neither. "
       "Use this when you want to check the semantics of an IR program. "
       "Use this ONLY for small programs, rather than large-scale software. "
       f"Note 1: uses the llubi binary built at {self.llvm_build_dir}, so its behavior reflects any local edits to the LLVM source. "
-      "Note 2: this tool exists after LLVM 23.0.0",
+      "Note 2: this tool is available since LLVM 23.0.0",
       [
         FuncToolSpec.Param(
           "input_path",
@@ -34,7 +34,7 @@ class InterpretIrTool(LlvmBuildDirMixin, StatelessFuncToolBase):
           "args",
           "string",
           False,
-          "Optional arguments passed to lli before the input file. "
+          "Optional arguments passed to llubi before the input file. "
           "Example: '--entry-function==test' to specify the entry function to interpret. "
           "By default, the entry function is 'main'. "
           "Example: '--verbose' to print intermediate results for each instruction executed.",
