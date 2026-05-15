@@ -16,6 +16,7 @@ from autofix.mini import (
   RunStats,
   add_input_args,
   build_harness_from_args,
+  configure_lit_test_dirs,
 )
 from harness.llvm.harness import Harness
 from harness.lms.tool import FuncToolCallException
@@ -210,6 +211,9 @@ def main():
     print("Building LLVM and try reproducing the issue ...")
     issue = h.reproduce()
     print("Issue reproduced successfully.")
+
+    # Narrow lit regression scope from the opt command (no backtrace here).
+    configure_lit_test_dirs(h, issue.raw_command, log=print)
 
     prompt = PROMPT_TEMPLATE.format(
       issue_type=issue.bug_type,

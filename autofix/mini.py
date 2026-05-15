@@ -693,7 +693,9 @@ _FULL_MIDEND_LIT_DIRS = ["llvm/test/Transforms", "llvm/test/Analysis"]
 
 
 def _infer_lit_test_dirs(
-  harness: Harness, raw_command: str, backtrace: StackTrace
+  harness: Harness,
+  raw_command: str,
+  backtrace: Optional[StackTrace] = None,
 ) -> List[str]:
   """Collect every lit test dir credibly implicated by the bug.
 
@@ -701,12 +703,10 @@ def _infer_lit_test_dirs(
 
   1. Every pass name from ``-passes=...`` (so ``-passes=A,B`` contributes
      both ``test/Transforms/A`` and ``test/Transforms/B`` when they exist).
-  2. The topmost backtrace frame that yields any match, via:
-     a. File basename (``SLPVectorizer.cpp`` → ``SLPVectorizer``).
-     b. ``lib/(Transforms|Analysis)/<X>`` directory name.
-     c. Curated utility-pass mapping (``lib/Analysis/ValueTracking.cpp``
-        → ``instcombine`` → ``test/Transforms/InstCombine``) — catches
-        helper code shared across passes.
+  2. When a backtrace is supplied, the topmost frame that yields a match,
+     via file basename, ``lib/(Transforms|Analysis)/<X>`` directory name,
+     or the curated utility-pass mapping. Scripts without a debugger (xcli,
+     mswe) pass ``backtrace=None`` and rely on the command alone.
 
   Each candidate is fuzzy-matched against the actual ``test/Transforms/*``
   and ``test/Analysis/*`` tree, so nothing is returned unless the directory
@@ -725,6 +725,9 @@ def _infer_lit_test_dirs(
   for pass_name in llvmcode.resolve_pass_names(raw_command):
     _add(llvmcode.resolve_test_dir(pass_name))
 
+  if backtrace is None:
+    return dirs
+
   for frame in reversed(backtrace):
     file_path = str(frame.file)
     before = len(dirs)
@@ -738,6 +741,37 @@ def _infer_lit_test_dirs(
     if len(dirs) > before:
       break  # first frame that contributed — deeper frames are noisy
   return dirs
+
+
+def configure_lit_test_dirs(
+  harness: Harness,
+  raw_command: str,
+  *,
+  backtrace: Optional[StackTrace] = None,
+  log=print,
+  warn=None,
+) -> None:
+  """Set ``harness.fixenv.card.lit_test_dir`` from inference.
+
+  No-op when it's already set (bench-curated issues). When nothing can be
+  inferred, falls back to the full middle-end suite — same scope as
+  ``--aggressive-testing``. ``log`` is called with a success line, ``warn``
+  (defaults to ``log``) with the fallback notice.
+  """
+  card = harness.fixenv.card
+  if card.lit_test_dir is not None:
+    return
+  warn = warn or log
+  inferred = _infer_lit_test_dirs(harness, raw_command, backtrace)
+  if inferred:
+    log(f"Inferred lit_test_dir: {inferred}")
+    card.lit_test_dir = inferred
+  else:
+    warn(
+      "Warning: could not infer a narrow lit_test_dir; "
+      f"falling back to full middle-end: {_FULL_MIDEND_LIT_DIRS}"
+    )
+    card.lit_test_dir = list(_FULL_MIDEND_LIT_DIRS)
 
 
 def is_interesting_file(filename: str) -> bool:
@@ -1001,20 +1035,14 @@ def autofix(
 
   # For ad-hoc reproducers (no bench-curated lit_test_dir), narrow the lit
   # regression scope to the dirs implicated by the bug. If we can't narrow
-  # it (e.g. CodeGen-only bug, exotic pipeline), fall back to the full
-  # middle-end suite — slower but safe.
-  if harness.fixenv.card.lit_test_dir is None:
-    inferred = _infer_lit_test_dirs(harness, rep.raw_command, backtrace)
-    if inferred:
-      console.print(f"Inferred lit_test_dir: {inferred}")
-      harness.fixenv.card.lit_test_dir = inferred
-    else:
-      console.print(
-        "Warning: could not infer a narrow lit_test_dir; "
-        f"falling back to full middle-end: {_FULL_MIDEND_LIT_DIRS}",
-        color="yellow",
-      )
-      harness.fixenv.card.lit_test_dir = list(_FULL_MIDEND_LIT_DIRS)
+  # it, fall back to the full middle-end suite — slower but safe.
+  configure_lit_test_dirs(
+    harness,
+    rep.raw_command,
+    backtrace=backtrace,
+    log=console.print,
+    warn=lambda msg: console.print(msg, color="yellow"),
+  )
 
   # Run opt to get the optimization pass and the verbose log of the reproducer's execution
   # These information will help the agent understand the context better
