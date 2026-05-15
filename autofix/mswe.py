@@ -24,12 +24,13 @@ from autofix.mini import (
   AGENT_MAX_CONSUMED_TOKENS,
   AGENT_TEMPERATURE,
   AGENT_TOP_P,
-  MAX_TCS_EDIT_AND_TEST,
+  MAX_TCS_HEAVYWEIGHT_TOOLS,
   NoAvailablePatchFound,
   ReachToolBudget,
   RunStats,
   add_input_args,
   build_harness_from_args,
+  configure_lit_test_dirs,
 )
 from harness.llvm.harness import Harness
 from harness.lms.meter import GlobalMeter
@@ -141,8 +142,8 @@ class MyAgent(DefaultAgent):
     self.stats = stats
     self.harness: Harness | None = None
     self.tester = None
-    self.test_budget = MAX_TCS_EDIT_AND_TEST
-    self.edit_budget = MAX_TCS_EDIT_AND_TEST
+    self.test_budget = MAX_TCS_HEAVYWEIGHT_TOOLS
+    self.edit_budget = MAX_TCS_HEAVYWEIGHT_TOOLS
 
   def setup(self, harness: Harness):
     self.harness = harness
@@ -274,6 +275,14 @@ def main():
       console.print("Building LLVM and try reproducing the issue ...")
       issue = h.reproduce()
       console.print("Issue reproduced successfully.")
+
+      # Narrow lit regression scope from the opt command (no backtrace here).
+      configure_lit_test_dirs(
+        h,
+        issue.raw_command,
+        log=console.print,
+        warn=lambda msg: console.print(msg, color="yellow"),
+      )
 
       stats.total_time_sec = time.time()
       console.print("Starting to fix the issue ...")
