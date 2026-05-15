@@ -49,8 +49,14 @@ if [[ ! -d $LAB_LLVM_BUILD_DIR ]]; then
 fi
 
 export LAB_LLVM_ALIVE_TV=$(which alive-tv)
-if [[ $LAB_LLVM_ALIVE_TV == "alive-tv not found" ]]; then
+if [[ ! -x $LAB_LLVM_ALIVE_TV ]]; then
   echo "Error: alive-tv does not exist."
+  return 1
+fi
+
+export LAB_LLVM_LLUBI_LEGACY=$(which llubi_legacy)
+if [[ ! -x $LAB_LLVM_LLUBI_LEGACY ]]; then
+  echo "Error: llubi (legacy) does not exist."
   return 1
 fi
 

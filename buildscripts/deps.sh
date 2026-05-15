@@ -54,6 +54,15 @@ DEP_RE2C_SOURCE_DIR=${DEP_RE2C_DIR}/re2c-${DEP_RE2C_VERSION}
 DEP_RE2C_BUILD_DIR=${DEP_RE2C_DIR}/build
 
 #-================================
+# llubi (legacy)
+#-================================
+
+DEP_LLUBI_LEGACY_DIR=${LLVM_HARNESS_DEPS_DIR}/llubi-legacy
+DEP_LLUBI_LEGACY_VERSION=9798ef7520061b89485475c9739a8c578528f3f7
+DEP_LLUBI_LEGACY_SOURCE_DIR=${DEP_LLUBI_LEGACY_DIR}/llubi
+DEP_LLUBI_LEGACY_BUILD_DIR=${DEP_LLUBI_LEGACY_DIR}/build
+
+#-================================
 # Python dependencies
 #-================================
 
