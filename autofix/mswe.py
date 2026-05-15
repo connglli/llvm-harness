@@ -29,6 +29,7 @@ from autofix.mini import (
   ReachToolBudget,
   RunStats,
   add_common_args,
+  build_agent_config,
   build_harness_from_args,
   configure_lit_test_dirs,
 )
@@ -255,7 +256,10 @@ def main():
 
     try:
       harness_ctx = build_harness_from_args(
-        args, aggressive_testing=args.aggressive_testing
+        args,
+        agent_config=build_agent_config,
+        aggressive_testing=args.aggressive_testing,
+        do_print=console.print,
       )
     except ValueError as e:
       panic(str(e))
