@@ -193,6 +193,11 @@ class Harness:
     return Path(llvm_ops.llvm_alive_tv).resolve()
 
   @property
+  def llubi_legacy_path(self) -> Path:
+    """Path to the (legacy) llubi binary."""
+    return Path(llvm_ops.llvm_llubi_legacy).resolve()
+
+  @property
   def llvmcode(self) -> LlvmCode:
     """Lazily-created :class:`LlvmCode` for LLVM source analysis."""
     if self._llvmcode is None:
@@ -597,6 +602,11 @@ class Harness:
 
     tools.append(VerifyIrTool(self.alive_tv_path))
     tools.append(VerifyOptimTool(build_dir, str(self.alive_tv_path)))
+
+    # -- Llegacy llubi (independent of the LLVM build dir) --
+    from harness.tools.llvm_llubi_legacy import InterpretIrLegacyTool
+
+    tools.append(InterpretIrLegacyTool(str(self.llubi_legacy_path)))
 
     # -- Env-dependent tools (bench issue) --
     if self.fixenv is not None:

@@ -69,6 +69,7 @@ ENABLED_REASON_TOOLS = {
   "llvm_eval_expr",
   # Execution tools
   "llvm_interpret_ir",
+  "llvm_interpret_ir_legacy",
   "llvm_execute_ir",
   # Subagent tools
   "subagent",
@@ -105,6 +106,7 @@ ENABLED_REPAIR_TOOLS = {
   "llvm_test",
   "llvm_preview_patch",
   "llvm_interpret_ir",
+  "llvm_interpret_ir_legacy",
   "llvm_execute_ir",
   "llvm_optimize_ir",
   "llvm_compile_ir",
@@ -138,6 +140,7 @@ DEFERRED_TOOLS = {
   "llvm_langref",
   "llvm_code",
   "llvm_interpret_ir",
+  "llvm_interpret_ir_legacy",
   "llvm_execute_ir",
   "llvm_optimize_ir",
   "llvm_compile_ir",
