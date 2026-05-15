@@ -28,7 +28,7 @@ from autofix.mini import (
   NoAvailablePatchFound,
   ReachToolBudget,
   RunStats,
-  add_input_args,
+  add_common_args,
   build_harness_from_args,
   configure_lit_test_dirs,
 )
@@ -197,7 +197,7 @@ class MyAgent(DefaultAgent):
 
 def parse_args():
   parser = ArgumentParser(description="mini-swe-agent (llvm-autofix)")
-  add_input_args(parser)
+  add_common_args(parser)
   parser.add_argument(
     "--model",
     type=str,

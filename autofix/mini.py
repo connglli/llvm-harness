@@ -1069,11 +1069,15 @@ def autofix(
   )
 
 
-def add_input_args(parser: ArgumentParser) -> None:
-  """Register the ``--issue`` / ``--reproducer`` mutex group and ``--base-commit``.
+def add_common_args(parser: ArgumentParser) -> None:
+  """Register ``--issue``/``--reproducer`` (mutex), ``--base-commit``, and
+  ``--pull-latest``.
 
   Shared across ``autofix.mini``, ``autofix.xcli``, and ``autofix.mswe`` so
-  every entry point exposes the same input surface.
+  every entry point exposes the same input surface. ``--pull-latest`` and
+  ``--base-commit`` compose: ``--pull-latest`` runs first (``git pull
+  origin main``), then ``--base-commit``'s checkout — useful when the
+  target commit was only just published.
   """
   src = parser.add_mutually_exclusive_group(required=True)
   src.add_argument(
@@ -1098,15 +1102,29 @@ def add_input_args(parser: ArgumentParser) -> None:
     default=None,
     help=(
       "Git commit to base the fix on (overrides bench-provided base commit). "
-      "Defaults to HEAD."
+      "Defaults to HEAD of the already pulled LLVM source tree."
+    ),
+  )
+  parser.add_argument(
+    "--pull-latest",
+    action="store_true",
+    default=False,
+    help=(
+      "Pull the latest LLVM source tree before building the harness. "
+      "Composes with --base-commit (pull first, then checkout)."
     ),
   )
 
 
 def build_harness_from_args(args, *, aggressive_testing: bool) -> Harness:
   """Construct a :class:`Harness` from CLI args produced by
-  :func:`add_input_args`. Raises ``ValueError`` on a malformed reproducer file.
+  :func:`add_common_args`. Raises ``ValueError`` on a malformed reproducer file.
   """
+  if args.pull_latest:
+    from harness.llvm.intern import llvm as llvm_ops
+
+    llvm_ops.pull_latest()
+
   if args.issue is not None:
     return Harness.from_issue_id(
       args.issue,
@@ -1124,7 +1142,7 @@ def build_harness_from_args(args, *, aggressive_testing: bool) -> Harness:
 
 def parse_args():
   parser = ArgumentParser(description="llvm-autofix (mini)")
-  add_input_args(parser)
+  add_common_args(parser)
   parser.add_argument(
     "--model",
     type=str,
