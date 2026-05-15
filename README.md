@@ -11,6 +11,7 @@ llvm-harness is an agentic harness of [LLVM](https://github.com/llvm/llvm-projec
 
 ## 🔥 News
 
+- 2026-05-16: Support fixing middle-end bugs reduced by [llvm-autoreduce](https://github.com/dtcxzyw/llvm-autoreduce) with `--autoreduce --issue ID`.
 - 2026-04-16: The project was renamed to `llvm-harness`.
 - 2026-04-03: We started refactoring of the project and plan to rename it to `llvm-harness`.
 - 2026-03-20: We released `llvm-autofix`, an agentic harness for real-world compilers.
