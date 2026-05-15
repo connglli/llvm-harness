@@ -284,6 +284,11 @@ def verify_test_group(repro: bool, input, type: str):
 def verify_lit(
   test_commit, dirs, max_test_jobs, test_commit_checkout_changed_files_only
 ):
+  if not dirs:
+    # Ad-hoc reproducers may have no scoped lit dir; skip the lit step rather
+    # than crash. Aggressive callers (e.g. post_validate) supply Transforms +
+    # Analysis explicitly, so this only short-circuits the genuinely-empty case.
+    return (True, "no lit dirs configured; skipping lit regression")
   try:
     # In some edge cases, we cannot find a suitable test commit that is buildable and green.
     # We only checkout the changed files instead.

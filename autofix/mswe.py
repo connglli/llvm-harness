@@ -19,7 +19,6 @@ from minisweagent.run.utils.save import save_traj
 
 import harness
 from autofix.mini import (
-  ADDITIONAL_CMAKE_FLAGS,
   AGENT_MAX_CHAT_ROUNDS,
   AGENT_MAX_COMPLETION_TOKENS,
   AGENT_MAX_CONSUMED_TOKENS,
@@ -29,6 +28,8 @@ from autofix.mini import (
   NoAvailablePatchFound,
   ReachToolBudget,
   RunStats,
+  add_input_args,
+  build_harness_from_args,
 )
 from harness.llvm.harness import Harness
 from harness.lms.meter import GlobalMeter
@@ -195,12 +196,7 @@ class MyAgent(DefaultAgent):
 
 def parse_args():
   parser = ArgumentParser(description="mini-swe-agent (llvm-autofix)")
-  parser.add_argument(
-    "--issue",
-    type=str,
-    required=True,
-    help="The issue ID to fix.",
-  )
+  add_input_args(parser)
   parser.add_argument(
     "--model",
     type=str,
@@ -230,7 +226,7 @@ def parse_args():
     "--aggressive-testing",
     action="store_true",
     default=False,
-    help="Use all Transforms and Analysis tests for testing patches (default: False).",
+    help="Use all Transforms and Analysis tests for testing patches online (default: False).",
   )
   return parser.parse_args()
 
@@ -256,14 +252,25 @@ def main():
   try:
     stats = RunStats(command=vars(args))
 
-    with Harness.from_issue_id(
-      args.issue,
-      cmake_args=ADDITIONAL_CMAKE_FLAGS,
-      aggressive_testing=args.aggressive_testing,
-    ) as h:
+    try:
+      harness_ctx = build_harness_from_args(
+        args, aggressive_testing=args.aggressive_testing
+      )
+    except ValueError as e:
+      panic(str(e))
+
+    with harness_ctx as h:
       agent = MyAgent(args.model, args.driver, stats, workdir=str(h.llvm_dir))
       agent.setup(h)
 
+      if args.issue is not None:
+        console.print(f"Issue ID: {args.issue}")
+      else:
+        repro = h.fixenv.card.reproducers[0]
+        console.print(f"Reproducer File: {repro.file}")
+        console.print(f"Reproducer Command: {repro.commands[0]}")
+        console.print(f"Bug Type: {h.fixenv.get_bug_type()}")
+        console.print(f"Base Commit: {h.fixenv.get_base_commit()}")
       console.print("Building LLVM and try reproducing the issue ...")
       issue = h.reproduce()
       console.print("Issue reproduced successfully.")

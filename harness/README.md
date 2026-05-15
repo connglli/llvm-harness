@@ -161,9 +161,11 @@ After attaching, `h.make_tools()` includes debugger-dependent tools (`code`, `do
 The `llvmcode` property provides LLVM C++ source analysis:
 
 ```python
-# Resolve opt pass names
-pass_name, analysis = h.llvmcode.resolve_pass_name(command)
-opts = h.llvmcode.resolve_pass_opts(pass_name)
+# Extract pass names from `-passes=...` (empty list when none)
+passes = h.llvmcode.resolve_pass_names(command)
+# Find the useful analysis passes implied by a list of transform passes
+analysis_passes = h.llvmcode.resolve_related_passes(passes)
+opts = [o for p in passes for o in h.llvmcode.resolve_pass_opts(p)]
 
 # Find DEBUG_TYPE values in source files
 debug_types = h.llvmcode.resolve_debug_types({Path("llvm/lib/Transforms/Scalar/GVN.cpp")})

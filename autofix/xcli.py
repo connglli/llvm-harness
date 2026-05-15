@@ -11,7 +11,12 @@ from typing import Optional
 from uuid import uuid4 as uuid
 
 import harness
-from autofix.mini import ADDITIONAL_CMAKE_FLAGS, NoAvailablePatchFound, RunStats
+from autofix.mini import (
+  NoAvailablePatchFound,
+  RunStats,
+  add_input_args,
+  build_harness_from_args,
+)
 from harness.llvm.harness import Harness
 from harness.lms.tool import FuncToolCallException
 from harness.utils import cmdline
@@ -29,12 +34,7 @@ def panic(msg: str):
 
 def parse_args():
   parser = ArgumentParser(description="Wrapper of XXX CLI/Agent (llvm-autofix)")
-  parser.add_argument(
-    "--issue",
-    type=str,
-    required=True,
-    help="The issue ID to fix.",
-  )
+  add_input_args(parser)
   parser.add_argument(
     "--xcli",
     type=str,
@@ -58,7 +58,7 @@ def parse_args():
     "--aggressive-testing",
     action="store_true",
     default=False,
-    help="Use all Transforms and Analysis tests for testing patches (default: False).",
+    help="Use all Transforms and Analysis tests for testing patches online (default: False).",
   )
   return parser.parse_args()
 
@@ -191,11 +191,22 @@ def main():
   if stats_path.exists():
     panic(f"Stats file {args.stats} already exists.")
 
-  with Harness.from_issue_id(
-    args.issue,
-    cmake_args=ADDITIONAL_CMAKE_FLAGS,
-    aggressive_testing=args.aggressive_testing,
-  ) as h:
+  try:
+    harness_ctx = build_harness_from_args(
+      args, aggressive_testing=args.aggressive_testing
+    )
+  except ValueError as e:
+    panic(str(e))
+
+  with harness_ctx as h:
+    if args.issue is not None:
+      print(f"Issue ID: {args.issue}")
+    else:
+      repro = h.fixenv.card.reproducers[0]
+      print(f"Reproducer File: {repro.file}")
+      print(f"Reproducer Command: {repro.commands[0]}")
+      print(f"Bug Type: {h.fixenv.get_bug_type()}")
+      print(f"Base Commit: {h.fixenv.get_base_commit()}")
     print("Building LLVM and try reproducing the issue ...")
     issue = h.reproduce()
     print("Issue reproduced successfully.")
