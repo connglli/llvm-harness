@@ -90,6 +90,19 @@ ninja -C ${DEP_ALIVE2_BUILD_DIR}
 sudo ninja -C ${DEP_ALIVE2_BUILD_DIR} install
 
 #-================================
+# llubi (legacy)
+#-================================
+
+mkdir -p ${DEP_LLUBI_LEGACY_DIR}
+git clone https://github.com/dtcxzyw/llvm-ub-aware-interpreter ${DEP_LLUBI_LEGACY_SOURCE_DIR}
+git -C ${DEP_LLUBI_LEGACY_SOURCE_DIR} checkout ${DEP_LLUBI_LEGACY_VERSION}
+cmake -S ${DEP_LLUBI_LEGACY_SOURCE_DIR} -B ${DEP_LLUBI_LEGACY_BUILD_DIR} -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DLLVM_DIR=${DEP_LLVM_BUILD_DIR}/lib/cmake/llvm
+ninja -C ${DEP_LLUBI_LEGACY_BUILD_DIR}
+sudo mv ${DEP_LLUBI_LEGACY_BUILD_DIR}/llubi /usr/local/bin/llubi_legacy
+
+#-================================
 # LLVM: Postprocessing
 #-================================
 
@@ -117,5 +130,6 @@ rm -rf ${DEP_LLVM_BUILD_DIR} \
   ${DEP_CCACHE_DIR} \
   ${DEP_Z3_DIR} \
   ${DEP_RE2C_DIR} \
-  ${DEP_ALIVE2_DIR}
+  ${DEP_ALIVE2_DIR} \
+  ${DEP_LLUBI_LEGACY_DIR}
 git -C ${DEP_LLVM_SOURCE_DIR} checkout main
