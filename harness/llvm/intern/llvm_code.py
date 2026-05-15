@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
 import tree_sitter_cpp
 from tree_sitter import Language, Parser, Tree, TreeCursor
@@ -119,28 +119,125 @@ class LlvmCode:
     ],
   }
 
-  def resolve_pass_name(self, args: str) -> Tuple[str, List[str]]:
-    """Resolve the pass name(s) of the given llvm file"""
-    # TODO: Support more closely-bound analysis passes
-    pos = args.find("passes=")
-    next = args.find(" ", pos)
-    pass_name = args[pos + 7 : next]
+  _PASS_NAME_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_\-]*")
 
-    analysis_passes = []
+  # Hand-curated "this helper code is conventionally exercised by that pass"
+  # mappings. When a bug surfaces in shared infrastructure (KnownBits,
+  # ValueTracking, ConstantFolding, …), pinning regressions to the owning
+  # pass's test suite is much more useful than to the helper's own narrow
+  # tests. Substring match against the backtrace's file path; first hit wins.
+  _UTILITY_TO_PASS: tuple[tuple[str, str], ...] = (
+    # InstCombine family — helpers that mostly surface via InstCombine.
+    ("llvm/lib/Analysis/InstructionSimplify", "instcombine"),
+    ("llvm/lib/Analysis/ValueTracking", "instcombine"),
+    ("llvm/lib/Analysis/ConstantFolding", "instcombine"),
+    ("llvm/lib/IR/ConstantFold", "instcombine"),
+    ("llvm/lib/IR/ConstantRange", "instcombine"),
+    ("llvm/lib/IR/ConstantFPRange", "instcombine"),
+    ("llvm/lib/Support/KnownBits", "instcombine"),
+    ("llvm/lib/Support/KnownFPClass", "instcombine"),
+    ("llvm/include/llvm/Analysis/InstructionSimplify", "instcombine"),
+    ("llvm/include/llvm/Analysis/ValueTracking", "instcombine"),
+    ("llvm/include/llvm/Analysis/ConstantFolding", "instcombine"),
+    ("llvm/include/llvm/Support/KnownBits", "instcombine"),
+    ("llvm/include/llvm/Support/KnownFPClass", "instcombine"),
+    # Owner-pass overrides where the lib dir name doesn't match the pass.
+    ("llvm/lib/Transforms/Utils/SimplifyCFG.cpp", "simplifycfg"),
+    ("llvm/lib/Transforms/Vectorize/VectorCombine", "vector-combine"),
+  )
 
-    for name, keys in self._USEFUL_ANALYSIS_PASSES.items():
+  def resolve_utility_pass(self, file_path: str) -> str | None:
+    """Map a backtrace file path to its conventional owning pass name.
+
+    Encodes a hand-curated set of "this helper is exercised by that pass"
+    relationships (e.g. ``lib/Analysis/ValueTracking.cpp`` is mostly
+    surfaced by InstCombine, so its bugs should be regression-guarded by
+    the InstCombine test suite). Returns ``None`` when the path isn't in
+    the table — callers should fall back to other heuristics.
+    """
+    for prefix, pass_name in self._UTILITY_TO_PASS:
+      if prefix in file_path:
+        return pass_name
+    return None
+
+  def resolve_pass_names(self, command: str) -> List[str]:
+    """Extract all transform pass names from an opt ``-passes=<...>`` flag.
+
+    Multi-pass pipelines (``A,B,C``), pipeline adaptors
+    (``function(X<...>)``), and quoted args all expand into their
+    identifier-like tokens, in left-to-right order, deduplicated. Pass
+    parameters (``<bonus-inst-threshold=1>``) come along too but harmlessly
+    fail downstream lookups since they aren't real pass names.
+
+    Returns ``[]`` when the command has no ``-passes=`` flag (e.g.
+    ``opt -O2``).
+    """
+    pos = command.find("passes=")
+    if pos < 0:
+      return []
+    rest = command[pos + len("passes=") :]
+    if rest and rest[0] in ("'", '"'):
+      rest = rest[1:]  # don't terminate on the opening quote of a quoted arg
+    # Stop at the closing quote / whitespace boundary so we don't bleed
+    # into the next CLI flag.
+    for sep in ("'", '"', " "):
+      i = rest.find(sep)
+      if i >= 0:
+        rest = rest[:i]
+    seen: set[str] = set()
+    out: List[str] = []
+    for tok in self._PASS_NAME_RE.findall(rest):
+      if tok not in seen:
+        seen.add(tok)
+        out.append(tok)
+    return out
+
+  def resolve_related_passes(self, pass_names: List[str]) -> List[str]:
+    """Find the useful analysis passes implied by ``pass_names``.
+
+    Returns analysis passes whose verbose log output complements the given
+    transform passes (e.g. ``print<scalar-evolution>``, ``aa-eval``).
+    Useful when reconstructing a ``-passes=`` flag to collect richer debug
+    output. Compose with :meth:`resolve_pass_names` when starting from a
+    raw command string.
+    """
+    analysis_passes: List[str] = []
+    for analysis_pass, keys in self._USEFUL_ANALYSIS_PASSES.items():
       for key in keys:
-        if key in pass_name:
-          analysis_passes.append(name)
+        if any(key in p for p in pass_names):
+          analysis_passes.append(analysis_pass)
           break
-
-    return pass_name, analysis_passes
+    return analysis_passes
 
   def resolve_pass_opts(self, pass_name: str) -> List[str]:
     """Resolve the useful options of a given pass"""
     if pass_name == "aa-eval":
       return ["-aa-pipeline=basic-aa", "-print-all-alias-modref-info"]
     return []
+
+  def resolve_test_dir(self, candidate_name: str) -> str | None:
+    """Find the lit test directory matching ``candidate_name``.
+
+    Looks under ``llvm/test/Transforms/*`` and ``llvm/test/Analysis/*`` and
+    matches by case-insensitive, non-alphanumeric-stripped comparison, so
+    e.g. ``slp-vectorizer`` → ``SLPVectorizer``, ``simplifycfg`` → ``SimplifyCFG``,
+    ``loop-vectorize`` → ``LoopVectorize``. Returns the matching dir relative
+    to the LLVM root (e.g. ``llvm/test/Transforms/SLPVectorizer``) or ``None``.
+    """
+    target = "".join(c.lower() for c in candidate_name if c.isalnum())
+    if not target:
+      return None
+    for parent in ("Transforms", "Analysis"):
+      parent_dir = self.llvm_dir / "llvm" / "test" / parent
+      if not parent_dir.is_dir():
+        continue
+      for entry in parent_dir.iterdir():
+        if not entry.is_dir():
+          continue
+        normalized = "".join(c.lower() for c in entry.name if c.isalnum())
+        if normalized == target:
+          return f"llvm/test/{parent}/{entry.name}"
+    return None
 
   def resolve_debug_types(self, files: Set[Path]) -> List[str]:
     """Resolve debug types of given files"""

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from argparse import ArgumentParser
 from dataclasses import asdict, dataclass, field
@@ -682,6 +683,63 @@ def run_mini_agent(
   )
 
 
+_LIT_TEST_DIR_PATTERN = re.compile(r"llvm/lib/(Transforms|Analysis)/([^/]+)/")
+
+
+# Fallback when nothing in the command or backtrace fuzzy-matches an existing
+# test dir — exercises the full middle-end regression set, same scope as
+# ``--aggressive-testing``.
+_FULL_MIDEND_LIT_DIRS = ["llvm/test/Transforms", "llvm/test/Analysis"]
+
+
+def _infer_lit_test_dirs(
+  harness: Harness, raw_command: str, backtrace: StackTrace
+) -> List[str]:
+  """Collect every lit test dir credibly implicated by the bug.
+
+  Sources, deduplicated and unioned:
+
+  1. Every pass name from ``-passes=...`` (so ``-passes=A,B`` contributes
+     both ``test/Transforms/A`` and ``test/Transforms/B`` when they exist).
+  2. The topmost backtrace frame that yields any match, via:
+     a. File basename (``SLPVectorizer.cpp`` → ``SLPVectorizer``).
+     b. ``lib/(Transforms|Analysis)/<X>`` directory name.
+     c. Curated utility-pass mapping (``lib/Analysis/ValueTracking.cpp``
+        → ``instcombine`` → ``test/Transforms/InstCombine``) — catches
+        helper code shared across passes.
+
+  Each candidate is fuzzy-matched against the actual ``test/Transforms/*``
+  and ``test/Analysis/*`` tree, so nothing is returned unless the directory
+  exists. Returns ``[]`` when no candidate matches — caller decides what to
+  fall back to.
+  """
+  llvmcode = harness.llvmcode
+  seen: set[str] = set()
+  dirs: List[str] = []
+
+  def _add(found: Optional[str]):
+    if found and found not in seen:
+      seen.add(found)
+      dirs.append(found)
+
+  for pass_name in llvmcode.resolve_pass_names(raw_command):
+    _add(llvmcode.resolve_test_dir(pass_name))
+
+  for frame in reversed(backtrace):
+    file_path = str(frame.file)
+    before = len(dirs)
+    m = _LIT_TEST_DIR_PATTERN.search(file_path)
+    if m:
+      _add(llvmcode.resolve_test_dir(Path(file_path).stem))
+      _add(llvmcode.resolve_test_dir(m.group(2)))
+    utility_pass = llvmcode.resolve_utility_pass(file_path)
+    if utility_pass:
+      _add(llvmcode.resolve_test_dir(utility_pass))
+    if len(dirs) > before:
+      break  # first frame that contributed — deeper frames are noisy
+  return dirs
+
+
 def is_interesting_file(filename: str) -> bool:
   if "llvm/ADT" in filename or "llvm/Support" in filename:
     return False
@@ -741,18 +799,21 @@ def run_opt(
   harness: Harness,
   backtrace: StackTrace,
 ):
-  # We get the transformation pass and its bound analysis passes
-  opt_pass, analy_pass = harness.llvmcode.resolve_pass_name(" ".join(rep.command))
-  console.print(f"Transform pass: {opt_pass}")
-  console.print(f"Analysis passes: {', '.join([str(ap) for ap in analy_pass])}")
+  # We get the transformation pass(es) and their bound analysis passes
+  opt_passes = harness.llvmcode.resolve_pass_names(" ".join(rep.command))
+  analy_passes = harness.llvmcode.resolve_related_passes(opt_passes)
+  console.print(f"Transform passes: {', '.join(opt_passes) or '<none>'}")
+  console.print(f"Analysis passes: {', '.join(analy_passes) or '<none>'}")
 
   # We run opt with the reproducer to collect verbose log
-  opt_args = rep.command[1:] + harness.llvmcode.resolve_pass_opts(opt_pass)
+  opt_args = list(rep.command[1:])
+  for p in opt_passes:
+    opt_args += harness.llvmcode.resolve_pass_opts(p)
   for idx in range(len(opt_args)):
     if opt_args[idx].count("-passes="):
-      opt_args[idx] = "--passes=" + ",".join(analy_pass + [opt_pass])
+      opt_args[idx] = "--passes=" + ",".join(analy_passes + opt_passes)
   opt_args.remove(str(rep.file_path))
-  for ap in analy_pass:
+  for ap in analy_passes:
     opt_args += harness.llvmcode.resolve_pass_opts(ap)
   opt_args.append(
     "--debug-only="
@@ -781,7 +842,7 @@ def run_opt(
     opt_log = opt_log[: opt_log.find("PLEASE submit a bug report to ")]
   console.printb(title="Opt Verbose Log", message=f"$ {opt_cmd}\n{opt_log}")
 
-  return opt_pass, opt_cmd, opt_log
+  return ",".join(opt_passes), opt_cmd, opt_log
 
 
 def _get_enabled_skills(
@@ -938,6 +999,23 @@ def autofix(
   debugger, backtrace = prepare_debugger(rep, harness=harness)
   stats.trans_point = backtrace[-1].as_tuple()
 
+  # For ad-hoc reproducers (no bench-curated lit_test_dir), narrow the lit
+  # regression scope to the dirs implicated by the bug. If we can't narrow
+  # it (e.g. CodeGen-only bug, exotic pipeline), fall back to the full
+  # middle-end suite — slower but safe.
+  if harness.fixenv.card.lit_test_dir is None:
+    inferred = _infer_lit_test_dirs(harness, rep.raw_command, backtrace)
+    if inferred:
+      console.print(f"Inferred lit_test_dir: {inferred}")
+      harness.fixenv.card.lit_test_dir = inferred
+    else:
+      console.print(
+        "Warning: could not infer a narrow lit_test_dir; "
+        f"falling back to full middle-end: {_FULL_MIDEND_LIT_DIRS}",
+        color="yellow",
+      )
+      harness.fixenv.card.lit_test_dir = list(_FULL_MIDEND_LIT_DIRS)
+
   # Run opt to get the optimization pass and the verbose log of the reproducer's execution
   # These information will help the agent understand the context better
   opt_pass, opt_cmd, opt_log = run_opt(
@@ -960,14 +1038,62 @@ def autofix(
   )
 
 
-def parse_args():
-  parser = ArgumentParser(description="llvm-autofix (mini)")
-  parser.add_argument(
+def add_input_args(parser: ArgumentParser) -> None:
+  """Register the ``--issue`` / ``--reproducer`` mutex group and ``--base-commit``.
+
+  Shared across ``autofix.mini``, ``autofix.xcli``, and ``autofix.mswe`` so
+  every entry point exposes the same input surface.
+  """
+  src = parser.add_mutually_exclusive_group(required=True)
+  src.add_argument(
+    # TODO: use --issue in the future for github issue ID
     "--issue",
     type=str,
-    required=True,
-    help="The issue ID to fix.",
+    default=None,
+    help="The bench issue ID to fix.",
   )
+  src.add_argument(
+    "--reproducer",
+    type=str,
+    default=None,
+    help=(
+      "Path to an ad-hoc reproducer .ll file. The file must embed two "
+      "directives: `; BUG: crash|miscompilation` and `; RUN: opt ...`."
+    ),
+  )
+  parser.add_argument(
+    "--base-commit",
+    type=str,
+    default=None,
+    help=(
+      "Git commit to base the fix on (overrides bench-provided base commit). "
+      "Defaults to HEAD."
+    ),
+  )
+
+
+def build_harness_from_args(args, *, aggressive_testing: bool) -> Harness:
+  """Construct a :class:`Harness` from CLI args produced by
+  :func:`add_input_args`. Raises ``ValueError`` on a malformed reproducer file.
+  """
+  if args.issue is not None:
+    return Harness.from_issue_id(
+      args.issue,
+      base_commit=args.base_commit,
+      cmake_args=ADDITIONAL_CMAKE_FLAGS,
+      aggressive_testing=aggressive_testing,
+    )
+  return Harness.from_reproducer(
+    args.reproducer,
+    base_commit=args.base_commit,
+    cmake_args=ADDITIONAL_CMAKE_FLAGS,
+    aggressive_testing=aggressive_testing,
+  )
+
+
+def parse_args():
+  parser = ArgumentParser(description="llvm-autofix (mini)")
+  add_input_args(parser)
   parser.add_argument(
     "--model",
     type=str,
@@ -997,7 +1123,7 @@ def parse_args():
     "--aggressive-testing",
     action="store_true",
     default=False,
-    help="Use all Transforms and Analysis tests for testing patches (default: False).",
+    help="Use all Transforms and Analysis tests for testing patches online (default: False).",
   )
   parser.add_argument(
     "--interactive",
@@ -1053,20 +1179,30 @@ def main():
       panic(f"Stats file {stats_path} already exists.")
 
   # --- Use Harness for LLVM setup and reproduction ---
-  with Harness.from_issue_id(
-    args.issue,
-    cmake_args=ADDITIONAL_CMAKE_FLAGS,
-    aggressive_testing=args.aggressive_testing,
-  ) as h:
+  try:
+    harness_ctx = build_harness_from_args(
+      args, aggressive_testing=args.aggressive_testing
+    )
+  except ValueError as e:
+    panic(str(e))
+
+  with harness_ctx as h:
     bug_type = h.fixenv.get_bug_type()
     if bug_type not in ["crash", "miscompilation"]:
       panic(f"Unsupported bug type: {bug_type}")
 
-    console.print(f"Issue ID: {args.issue}")
-    console.print(f"Issue Type: {bug_type}")
-    console.print(f"Issue Commit: {h.fixenv.get_base_commit()}")
-    console.print(f"Issue Title: {h.fixenv.get_issue_title()}")
-    console.print(f"Issue Labels: {h.fixenv.get_issue_labels()}")
+    if args.issue is not None:
+      console.print(f"Issue ID: {args.issue}")
+      console.print(f"Issue Type: {bug_type}")
+      console.print(f"Issue Commit: {h.fixenv.get_base_commit()}")
+      console.print(f"Issue Title: {h.fixenv.get_issue_title()}")
+      console.print(f"Issue Labels: {h.fixenv.get_issue_labels()}")
+    else:
+      repro = h.fixenv.card.reproducers[0]
+      console.print(f"Reproducer File: {repro.file}")
+      console.print(f"Reproducer Command: {repro.commands[0]}")
+      console.print(f"Bug Type: {bug_type}")
+      console.print(f"Base Commit: {h.fixenv.get_base_commit()}")
 
     console.print("Building LLVM and try reproducing the issue ...")
     rep = h.reproduce()

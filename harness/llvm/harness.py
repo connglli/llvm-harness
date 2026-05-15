@@ -4,7 +4,6 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
 from typing import Literal
 
 import harness
@@ -13,7 +12,7 @@ from harness.llvm.debugger import DebuggerBase
 from harness.llvm.intern import llvm as llvm_ops
 from harness.llvm.intern.lab_env import FixEnv
 from harness.llvm.intern.llvm_code import LlvmCode
-from harness.llvm.issue import IssueCard, Reproducer
+from harness.llvm.issue import IssueCard, Reproducer, parse_lit_reproducer
 from harness.lms.tool import FuncToolBase
 from harness.utils import cmdline
 
@@ -298,6 +297,7 @@ class Harness:
   def from_issue_id(
     issue_id: str,
     *,
+    base_commit: str | None = None,
     cmake_args: list[str] | None = None,
     max_build_jobs: int | None = None,
     max_test_jobs: int | None = None,
@@ -307,7 +307,10 @@ class Harness:
     extra_readable: list[str] | None = None,
     extra_ignored: list[str] | None = None,
   ) -> Harness:
-    """Create a harness for a bench issue from ``bench/``."""
+    """Create a harness for a bench issue from ``bench/``.
+
+    ``base_commit`` overrides the bench-provided base commit when given.
+    """
     data = llvm_ops.load_benchmark_issue(issue_id)
     hints = data.get("hints", {})
     card = IssueCard(
@@ -316,7 +319,7 @@ class Harness:
         Reproducer(file=t["file"], commands=t["commands"], tests=t["tests"])
         for t in data["tests"]
       ],
-      base_commit=data.get("base_commit"),
+      base_commit=base_commit or data.get("base_commit"),
       test_commit=data.get("test_commit", hints.get("fix_commit")),
       lit_test_dir=data.get("lit_test_dir"),
       issue=data.get("issue"),
@@ -341,9 +344,8 @@ class Harness:
   @staticmethod
   def from_reproducer(
     file: str | Path,
-    command: str,
-    bug_type: str,
     *,
+    base_commit: str | None = None,
     cmake_args: list[str] | None = None,
     max_build_jobs: int | None = None,
     max_test_jobs: int | None = None,
@@ -353,10 +355,18 @@ class Harness:
     extra_readable: list[str] | None = None,
     extra_ignored: list[str] | None = None,
   ) -> Harness:
-    """Create a harness for an ad-hoc bug from a user-provided file."""
+    """Create a harness for an ad-hoc bug from a lit-style ``.ll`` file.
+
+    The file must embed both directives:
+
+    * ``; BUG: crash`` or ``; BUG: miscompilation``
+    * ``; RUN: opt …``
+    """
+    reproducer, bug_type = parse_lit_reproducer(file)
     card = IssueCard(
       bug_type=bug_type,
-      reproducers=[Reproducer(file=str(file), commands=[command], tests=[])],
+      reproducers=[reproducer],
+      base_commit=base_commit,
     )
     return Harness.from_issue_card(
       card,
@@ -427,20 +437,14 @@ class Harness:
   def reproduce(self) -> ReprodRes:
     """Reproduce the configured bug and return a :class:`ReprodRes`.
 
-    For bench issues this builds LLVM and runs the reproducer tests.
-    For ad-hoc issues this runs the given command on the given file.
+    Builds LLVM and runs the reproducer test(s); the first failing test
+    becomes the :class:`ReprodRes` payload.
     """
     if self.fixenv is None:
       raise RuntimeError(
         "No issue configured. Use Harness.from_issue_card(), from_issue_id(), or from_reproducer()."
       )
-    # Bench issues have reproducers with test bodies — use check_fast.
-    # Ad-hoc issues have empty test bodies — run the command directly.
-    if self.fixenv.card.reproducers[0].tests:
-      return self._reproduce_bench()
-    return self._reproduce_adhoc()
 
-  def _reproduce_bench(self) -> ReprodRes:
     check_failed, check_log = self.fixenv.check_fast()
     if check_failed:
       raise RuntimeError(f"Failed to build or reproduce the issue.\n\n{check_log}")
@@ -451,7 +455,7 @@ class Harness:
     reprod_log = llvm_ops.pretty_render_log(reprod_data["log"])
 
     # Write the reproducer IR to a uniquely-named temp file.
-    reprod_file = _make_temp_ll(self._issue_id, reprod_code)
+    reprod_file = _make_temp_ll(self._issue_id or "adhoc", reprod_code)
 
     opt_binary = str(self.build_dir / "bin" / "opt")
     command = _parse_raw_command(raw_cmd, str(reprod_file), opt_binary)
@@ -463,47 +467,6 @@ class Harness:
       raw_command=raw_cmd,
       source=reprod_code,
       symptom=reprod_log,
-    )
-
-  def _reproduce_adhoc(self) -> ReprodRes:
-    card = self.fixenv.card
-    repro = card.reproducers[0]
-    reprod_file = Path(repro.file).resolve()
-    if not reprod_file.exists():
-      raise FileNotFoundError(f"Reproducer file not found: {reprod_file}")
-
-    raw_cmd = repro.commands[0]
-    opt_binary = str(self.build_dir / "bin" / "opt")
-    command = _parse_raw_command(raw_cmd, str(reprod_file), opt_binary)
-
-    # Run the command to verify the bug manifests.
-    cmd_str = " ".join(command)
-    try:
-      output = cmdline.getoutput(cmd_str, check=True, timeout=60)
-      symptom = output.decode(errors="replace")
-
-      if card.bug_type == "crash":
-        # If check=True didn't raise, opt exited 0 — unexpected for a crash.
-        if not llvm_ops.is_opt_crash(symptom):
-          raise RuntimeError(
-            f"Expected crash but opt exited normally.\n\noutput:\n{symptom}"
-          )
-    except CalledProcessError as e:
-      stderr = e.stderr.decode(errors="replace") if e.stderr else ""
-      stdout = e.stdout.decode(errors="replace") if e.stdout else ""
-      symptom = stderr or stdout or str(e)
-    except TimeoutExpired:
-      if card.bug_type != "hang":
-        raise
-      symptom = "Process timed out (hang detected)."
-
-    return ReprodRes(
-      bug_type=card.bug_type,
-      file_path=reprod_file,
-      command=command,
-      raw_command=raw_cmd,
-      source=reprod_file.read_text(),
-      symptom=symptom,
     )
 
   # -------------------------------------------------------------------
