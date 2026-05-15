@@ -14,7 +14,7 @@ import harness
 from autofix.mini import (
   NoAvailablePatchFound,
   RunStats,
-  add_input_args,
+  add_common_args,
   build_harness_from_args,
   configure_lit_test_dirs,
 )
@@ -35,7 +35,7 @@ def panic(msg: str):
 
 def parse_args():
   parser = ArgumentParser(description="Wrapper of XXX CLI/Agent (llvm-autofix)")
-  add_input_args(parser)
+  add_common_args(parser)
   parser.add_argument(
     "--xcli",
     type=str,
