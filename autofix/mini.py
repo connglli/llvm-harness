@@ -5,7 +5,7 @@ import time
 from argparse import ArgumentParser
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import yaml
 
@@ -1114,16 +1114,45 @@ def add_common_args(parser: ArgumentParser) -> None:
       "Composes with --base-commit (pull first, then checkout)."
     ),
   )
+  parser.add_argument(
+    "--autoreduce",
+    action="store_true",
+    default=False,
+    help=(
+      "Treat --issue as a GitHub issue ID in dtcxzyw/llvm-autoreduce. "
+      "The issue is fetched and normalized by the model into an "
+      "ad-hoc reproducer, then handled as if --reproducer had been used. "
+      "Implies --pull-latest. "
+      "Requires --issue."
+    ),
+  )
 
 
-def build_harness_from_args(args, *, aggressive_testing: bool) -> Harness:
+def build_harness_from_args(
+  args, *, agent_config: AgentConfig, aggressive_testing: bool, do_print: Callable
+) -> Harness:
   """Construct a :class:`Harness` from CLI args produced by
   :func:`add_common_args`. Raises ``ValueError`` on a malformed reproducer file.
   """
-  if args.pull_latest:
+  if args.pull_latest or args.autoreduce:
     from harness.llvm.intern import llvm as llvm_ops
 
     llvm_ops.pull_latest()
+
+  if args.autoreduce:
+    if args.issue is None:
+      raise ValueError("--autoreduce requires --issue <github-issue-id>")
+    from autofix.autored import fetch_autoreduce_reproducer
+
+    do_print(f"Fetching autoreduce reproducer for issue {args.issue} ...")
+    rpath, rinfo = fetch_autoreduce_reproducer(args.issue, agent_config=agent_config)
+    do_print(f"Autoreduced issue {args.issue} -> {rpath}")
+    return Harness.from_reproducer(
+      str(rpath),
+      base_commit=rinfo.llvm_commit,
+      cmake_args=ADDITIONAL_CMAKE_FLAGS,
+      aggressive_testing=aggressive_testing,
+    )
 
   if args.issue is not None:
     return Harness.from_issue_id(
@@ -1137,6 +1166,30 @@ def build_harness_from_args(args, *, aggressive_testing: bool) -> Harness:
     base_commit=args.base_commit,
     cmake_args=ADDITIONAL_CMAKE_FLAGS,
     aggressive_testing=aggressive_testing,
+  )
+
+
+def build_agent_config(driver: str, model: str, debug: bool) -> AgentConfig:
+  # Set up used LLMs and agents
+  if driver == "openai":
+    from harness.lms.openai_generic import GPTGenericAgent
+
+    driver_class = GPTGenericAgent
+  elif driver == "anthropic":
+    from harness.lms.anthropic_generic import ClaudeGenericAgent
+
+    driver_class = ClaudeGenericAgent
+  else:
+    panic(f"Unsupported LLM API driver: {driver}")
+
+  return AgentConfig(
+    driver_class=driver_class,
+    model=model,
+    temperature=AGENT_TEMPERATURE,
+    top_p=AGENT_TOP_P,
+    max_completion_tokens=AGENT_MAX_COMPLETION_TOKENS,
+    reasoning_effort=AGENT_REASONINT_EFFORT,
+    debug_mode=debug,
   )
 
 
@@ -1193,31 +1246,10 @@ def main():
     global console
     console = get_boxed_console(debug_mode=True)
 
-  # Set up used LLMs and agents
-  if args.driver == "openai":
-    from harness.lms.openai_generic import GPTGenericAgent
-
-    driver_class = GPTGenericAgent
-  elif args.driver == "anthropic":
-    from harness.lms.anthropic_generic import ClaudeGenericAgent
-
-    driver_class = ClaudeGenericAgent
-  else:
-    panic(f"Unsupported LLM API driver: {args.driver}")
-
+  aconf = build_agent_config(args.driver, args.model, args.debug)
   GlobalMeter.configure(
     token_limit=AGENT_MAX_CONSUMED_TOKENS,
     round_limit=AGENT_MAX_CHAT_ROUNDS,
-  )
-
-  aconf = AgentConfig(
-    driver_class=driver_class,
-    model=args.model,
-    temperature=AGENT_TEMPERATURE,
-    top_p=AGENT_TOP_P,
-    max_completion_tokens=AGENT_MAX_COMPLETION_TOKENS,
-    reasoning_effort=AGENT_REASONINT_EFFORT,
-    debug_mode=args.debug,
   )
 
   # Set up saved statistics and output
@@ -1230,7 +1262,10 @@ def main():
   # --- Use Harness for LLVM setup and reproduction ---
   try:
     harness_ctx = build_harness_from_args(
-      args, aggressive_testing=args.aggressive_testing
+      args,
+      agent_config=aconf,
+      aggressive_testing=args.aggressive_testing,
+      do_print=console.print,
     )
   except ValueError as e:
     panic(str(e))

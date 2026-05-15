@@ -19,6 +19,8 @@ from autofix.mini import (
   configure_lit_test_dirs,
 )
 from harness.llvm.harness import Harness
+from harness.lms.agent import AgentConfig
+from harness.lms.openai_generic import GPTGenericAgent
 from harness.lms.tool import FuncToolCallException
 from harness.utils import cmdline
 
@@ -184,6 +186,10 @@ def main():
   harness.require_home_dir()
 
   args = parse_args()
+  if args.autoreduce:
+    raise NotImplementedError(
+      "The --autoreduce option is not yet supported in XCLI mode currently."
+    )
 
   ensure_xcli_exists(args.xcli)
   print(f"Preparing {args.xcli} command to fix the LLVM issue ...")
@@ -194,7 +200,10 @@ def main():
 
   try:
     harness_ctx = build_harness_from_args(
-      args, aggressive_testing=args.aggressive_testing
+      args,
+      aggressive_testing=args.aggressive_testing,
+      agent_config=AgentConfig(model="gpt-4o", driver_class=GPTGenericAgent),
+      do_print=print,
     )
   except ValueError as e:
     panic(str(e))
