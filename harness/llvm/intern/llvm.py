@@ -19,6 +19,7 @@ _OPT_CRASH_INDICATORS = [
 llvm_dir = os.environ["LAB_LLVM_DIR"]
 __llvm_build_dir = os.environ["LAB_LLVM_BUILD_DIR"]
 llvm_alive_tv = os.environ["LAB_LLVM_ALIVE_TV"]
+llvm_llubi_legacy = os.environ["LAB_LLVM_LLUBI_LEGACY"]
 dataset_dir = os.environ["LAB_DATASET_DIR"]
 if "--quiet" not in subprocess.run(
   ["ninja", "--help"], capture_output=True

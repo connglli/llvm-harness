@@ -3,27 +3,28 @@ import subprocess
 from pathlib import Path
 
 from harness.lms.tool import FuncToolCallException, FuncToolSpec, StatelessFuncToolBase
-from harness.tools.llvm_mixins import LlvmBuildDirMixin
 from harness.utils.cmdline import spawn_process
 
 
-class InterpretIrTool(LlvmBuildDirMixin, StatelessFuncToolBase):
-  def __init__(self, llvm_build_dir: str):
-    LlvmBuildDirMixin.__init__(self, llvm_build_dir)
-    self._llubi = self._binary_path("llubi")
+class InterpretIrLegacyTool(StatelessFuncToolBase):
+  def __init__(self, llubi_legacy_path: str):
+    self._llubi = Path(llubi_legacy_path).resolve()
+    if not self._llubi.is_file():
+      raise FuncToolCallException(f"llubi_legacy not found at {self._llubi}")
 
   def spec(self) -> FuncToolSpec:
     return FuncToolSpec(
-      "llvm_interpret_ir",
+      "llvm_interpret_ir_legacy",
       "Interpret an LLVM IR file strictly following LLVM IR's semantics and return its output and exit code. "
-      "This tool is different from `llvm_execute_ir` in that it will check immediate undefined behaviors "
-      "during execution and handle poison values properly. "
-      "It does not have JIT compilation, neither. "
+      "Like `llvm_interpret_ir`, this checks immediate undefined behaviors during execution and handles poison "
+      "values properly, with no JIT compilation. "
       "Use this when you want to check the semantics of an IR program. "
       "Use this ONLY for small programs, rather than large-scale software. "
-      f"Note 1: uses the llubi binary built at {self.llvm_build_dir}, so its behavior reflects any local edits to the LLVM source. "
-      "Note 2: this tool is available since LLVM 23.0.0; "
-      "use the legacy version when unavailable.",
+      "Note 1: this uses the standalone (legacy) llubi binary from "
+      "dtcxzyw/llvm-ub-aware-interpreter, installed independently of the LLVM source tree — "
+      "so its behavior does NOT reflect local edits to the LLVM source. "
+      "Note 2: prefer this over `llvm_interpret_ir` when working with LLVM versions before 23.0.0 "
+      "or when you need a reference implementation independent of the local LLVM build.",
       [
         FuncToolSpec.Param(
           "input_path",
@@ -35,14 +36,13 @@ class InterpretIrTool(LlvmBuildDirMixin, StatelessFuncToolBase):
           "args",
           "string",
           False,
-          "Optional arguments passed to llubi before the input file. "
-          "Example: '--entry-function==test' to specify the entry function to interpret. "
-          "By default, the entry function is 'main'. "
+          "Optional arguments passed to llubi_legacy before the input file. "
           "Example: '--verbose' to print intermediate results for each instruction executed.",
         ),
       ],
       keywords=[
         "llubi",
+        "llubi_legacy",
         "interpret",
         "ub",
         "undefined",
@@ -50,6 +50,7 @@ class InterpretIrTool(LlvmBuildDirMixin, StatelessFuncToolBase):
         "poison",
         "ir",
         "semantics",
+        "legacy",
       ],
     )
 
