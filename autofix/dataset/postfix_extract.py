@@ -164,13 +164,56 @@ lit_test_dir = set(
 tests = []
 # FIXME: Run line extraction is fragile. It doesn't handle the cases that involve macros.
 # FIXME: The comments in regression tests may leak information about the original issue.
-runline_pattern = re.compile(r"; RUN: (.+)\| FileCheck")
+
+
+def _join_continuation_lines(text):
+  """Join lines ending with backslash (line continuations)."""
+  lines = text.splitlines()
+  result = []
+  i = 0
+  while i < len(lines):
+    line = lines[i]
+    if line.rstrip().endswith("\\"):
+      parts = [line.rstrip()[:-1]]
+      i += 1
+      while i < len(lines):
+        next_line = lines[i]
+        if next_line.rstrip().endswith("\\"):
+          stripped = next_line.rstrip()[:-1]
+          stripped = re.sub(r"^;\s*RUN:\s*", "", stripped)
+          parts.append(stripped)
+          i += 1
+        else:
+          stripped = next_line
+          stripped = re.sub(r"^;\s*RUN:\s*", "", stripped)
+          parts.append(stripped)
+          i += 1
+          break
+      result.append("".join(parts))
+    else:
+      result.append(line)
+      i += 1
+  return "\n".join(result)
+
+
+def _extract_run_commands(text):
+  """Extract RUN-line commands, truncating at the first | FileCheck."""
+  joined = _join_continuation_lines(text)
+  raw_commands = re.findall(r";\s*RUN:\s*(.+)", joined)
+  commands = []
+  for cmd in raw_commands:
+    truncated = re.split(r"\|\s*[Ff]ile[Cc]heck", cmd)[0].strip()
+    if truncated:
+      commands.append(truncated)
+  return commands
+
+
 testname_pattern = re.compile(r"define .+ @([.\w]+)\(")
 for file in test_patchset:
   test_file = llvm_helper.git_execute(["show", f"{fix_commit}:{file.path}"])
-  commands = []
-  for match in re.findall(runline_pattern, test_file):
-    commands.append(match.strip())
+  commands = _extract_run_commands(test_file)
+  if not commands:
+    print(f"WARNING: No RUN lines extracted from {file.path}")
   if issue_type != "miscompilation" and file.is_added_file:
     print(file.path, "full")
 
