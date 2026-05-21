@@ -107,6 +107,7 @@ sudo mv ${DEP_LLUBI_LEGACY_BUILD_DIR}/llubi /usr/local/bin/llubi_legacy
 #-================================
 
 # Pull the latest commits to make sure the repo is up-to-date.
+git -C ${DEP_LLVM_SOURCE_DIR} checkout main
 git -C ${DEP_LLVM_SOURCE_DIR} pull origin main
 
 #-================================
