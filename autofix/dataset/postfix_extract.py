@@ -15,18 +15,17 @@ from harness.llvm.intern.llvm_code import LlvmCode
 harness.require_home_dir()
 
 github_token = os.environ.get("LAB_GITHUB_TOKEN")
-if not github_token:
-  print("Error: The environment variable LAB_GITHUB_TOKEN is not set.")
-  exit(1)
 
 session = requests.Session()
 session.headers.update(
   {
     "X-GitHub-Api-Version": "2022-11-28",
-    "Authorization": f"Bearer {github_token}",
     "Accept": "application/vnd.github+json",
+    "User-Agent": "llvm-autofix-autoreview",
   }
 )
+if github_token:
+  session.headers["Authorization"] = f"Bearer {github_token}"
 
 subprocess.check_output(["llvm-extract", "--version"])
 

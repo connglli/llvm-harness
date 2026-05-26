@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from unidiff import PatchSet
@@ -45,14 +45,14 @@ def _append_query(url: str, **params) -> str:
 
 def _github_headers(accept: str) -> dict[str, str]:
   token = os.environ.get("LAB_GITHUB_TOKEN")
-  if not token:
-    raise RuntimeError("The environment variable LAB_GITHUB_TOKEN is not set.")
-  return {
+  headers = {
     "X-GitHub-Api-Version": "2022-11-28",
-    "Authorization": f"Bearer {token}",
     "Accept": accept,
     "User-Agent": "llvm-autofix-autoreview",
   }
+  if token:
+    headers["Authorization"] = f"Bearer {token}"
+  return headers
 
 
 def _github_get(url: str, *, accept: str) -> tuple[bytes, object]:
@@ -83,7 +83,9 @@ def _github_paginated_json(url: str) -> list[dict]:
   while True:
     batch = _github_get_json(_append_query(url, per_page=100, page=page))
     if not isinstance(batch, list):
-      raise RuntimeError(f"Expected list response from GitHub for {url}, got {type(batch)}")
+      raise RuntimeError(
+        f"Expected list response from GitHub for {url}, got {type(batch)}"
+      )
     items.extend(batch)
     if len(batch) < 100:
       break
@@ -241,6 +243,7 @@ def extract_tests_from_patch(full_patch: str) -> list[dict]:
       subtests.append({"test_name": test_name, "test_body": test_body})
 
     if not subtests:
+
       def is_valid_test_line(line: str) -> bool:
         stripped = line.strip()
         return not (
@@ -278,7 +281,9 @@ def fetch_pr_info(pr_id: int, *, refresh: bool = False) -> PRInfo:
   changed_files = [item["filename"] for item in files]
   changed_files_str = "\n".join(changed_files)
   if "/AsmParser/" in changed_files_str or "/Bitcode/" in changed_files_str:
-    raise RuntimeError("PR contains AsmParser or Bitcode changes, which are not supported.")
+    raise RuntimeError(
+      "PR contains AsmParser or Bitcode changes, which are not supported."
+    )
 
   llvm_files = [
     path for path in changed_files if path.startswith(("llvm/lib/", "llvm/include/"))
